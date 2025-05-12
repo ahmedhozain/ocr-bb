@@ -1,78 +1,58 @@
 import os
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, render_template, request
 from PIL import Image
 import pytesseract
 import re
-import tempfile
-
+import clips
 
 app = Flask(__name__)
-
-
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-
-
 UPLOAD_FOLDER = 'static/uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'  # تأكد من المسار
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
-        
         file = request.files['image']
         if file:
-            
-            filename = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
-            file.save(filename)
-
-            
-            print(f"Image saved at: {filename}")
-
-            
-            extracted_text = process_image(filename)
-
-            
-            print(f"Extracted Text: {extracted_text}")
-
-            return render_template('index.html', extracted_text=extracted_text, filename=file.filename)
-    
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+            file.save(filepath)
+            text = extract_text(filepath)
+            values = extract_values(text)
+            analysis = run_clips(values)
+            return render_template('index.html', extracted_text=text, analysis=analysis, filename=file.filename)
     return render_template('index.html')
 
-# دالة لتحليل الصورة باستخدام Tesseract
-def process_image(image_path):
-    try:
-        # تحميل الصورة
-        img = Image.open(image_path)
+def extract_text(image_path):
+    img = Image.open(image_path)
+    return pytesseract.image_to_string(img, lang='eng')
 
-        # استخراج النص
-        extracted_text = pytesseract.image_to_string(img, lang='eng')
+def extract_values(text):
+    data = {
+        "pH": re.search(r"pH\s*:\s*(\d+\.?\d*)", text),
+        "specific_gravity": re.search(r"Specific Gravity\s*:\s*(\d+\.?\d*)", text),
+        "pus_cells": re.search(r"Pus Cells\s*:\s*([\w\-]+)", text),
+        "rbcs": re.search(r"R\.?B\.?C\.?s\s*:\s*([\w\-]+)", text),
+        "crystals": re.search(r"Crystals\s*:\s*(\w+\s?\+*|Absent)", text),
+    }
+    return {k: (v.group(1) if v else "Unknown") for k, v in data.items()}
 
-        # طباعة للمساعدة في التشخيص
-        print(f"Extracted Text from image: {extracted_text}")
+def run_clips(values):
+    env = clips.Environment()
+    env.load("rules.clp")
 
-        
-        def extract_values(text):
-            data = {}
-            patterns = {
-                "pH": r"pH\s*:\s*(\d+\.?\d*)",
-                "Specific Gravity": r"Specific Gravity\s*:\s*(\d+)",
-                "Pus Cells": r"Pus Cells\s*:\s*(\d+-\d+)",
-                "R.B.Cs": r"R\.B\.Cs\s*:\s*(\d+-\d+)",
-                "Crystals": r"Crystals\s*:\s*(\w+\s?\+*)"
-            }
-            for key, pattern in patterns.items():
-                match = re.search(pattern, text)
-                if match:
-                    data[key] = match.group(1)
-            return data
+    fact = env.assert_string(f"""(result 
+        (pH {values['pH']}) 
+        (specific_gravity {values['specific_gravity']}) 
+        (pus_cells {values['pus_cells']}) 
+        (rbcs {values['rbcs']}) 
+        (crystals {values['crystals']})
+    )""")
 
-        
-        result = extract_values(extracted_text)
-        return extracted_text
-    except Exception as e:
-        print(f"Error during image processing: {e}")
-        return "Error processing image."
+    env.run()
+    output = "\n".join(str(m) for m in env.get_output())
+    return output or "✅ All results are within normal range."
 
 if __name__ == '__main__':
     app.run(debug=True)

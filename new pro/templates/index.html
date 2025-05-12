@@ -106,7 +106,6 @@
             margin-top: 20px;
             font-weight: 600;
         }
-
     </style>
 </head>
 <body>
@@ -129,6 +128,10 @@
             <div class="text-container">
                 <h3>Extracted Text</h3>
                 <textarea readonly>{{ extracted_text }}</textarea>
+            </div>
+            <div class="text-container">
+                <h3>CLIPS Analysis</h3>
+                <textarea readonly>{{ analysis }}</textarea>
             </div>
         </div>
     {% endif %}
